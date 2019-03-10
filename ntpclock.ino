@@ -15,10 +15,13 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoOTA.h>
 
+
 //
 // For dealing with NTP & the clock.
 //
-#include "NTPClient.h"
+#include "ezTime.h"
+Timezone TZ;
+
 
 //
 // The display-interface
@@ -49,41 +52,12 @@
 
 
 //
-// The timezone - comment out to stay at GMT.
-//
-#define TIME_ZONE (+3)
-
-
-//
-// NTP client, and UDP socket it uses.
-//
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
-
-
-//
 // Pin definitions for TM1637 and can be changed to other ports
 //
 #define CLK D3
 #define DIO D2
 TM1637 tm1637(CLK, DIO);
 
-
-//
-// Called just before the date/time is updated via NTP
-//
-void on_before_ntp()
-{
-    DEBUG_LOG("Updating date & time");
-}
-
-//
-// Called just after the date/time is updated via NTP
-//
-void on_after_ntp()
-{
-    DEBUG_LOG("Updated NTP client\n");
-}
 
 //
 // This function is called when the device is powered-on.
@@ -106,7 +80,7 @@ void setup()
     //   BRIGHT_TYPICAL   = 2
     //   BRIGHTEST        = 7
     //
-    tm1637.set(BRIGHT_DARKEST);
+    tm1637.set(BRIGHTEST);
 
     //
     // Handle WiFi setup
@@ -116,21 +90,22 @@ void setup()
 
 
     //
-    // Ensure our NTP-client is ready.
+    // Overwrite the default (pool.ntp.org) NTP server with a local one
     //
-    timeClient.begin();
+    setServer("192.168.1.1");
+
 
     //
-    // Configure the callbacks.
+    // Wait for NTP sync
     //
-    timeClient.on_before_update(on_before_ntp);
-    timeClient.on_after_update(on_after_ntp);
+    waitForSync();
+    
 
     //
-    // Setup the timezone & update-interval.
+    // This device is blocked from going out to the Internet therefore setPosix is used instead of setLocation
+    // For more details visit https://github.com/ropg/ezTime
     //
-    timeClient.setTimeOffset(TIME_ZONE * (60 * 60));
-    timeClient.setUpdateInterval(300 * 1000);
+    TZ.setPosix("EST5EDT,M3.2.0/2,M11.1.0/2"); // NYC
 
 
     //
@@ -182,7 +157,6 @@ void setup()
 }
 
 
-
 //
 // This function is called continously, and is responsible
 // for flashing the ":", and otherwise updating the display.
@@ -197,21 +171,19 @@ void loop()
     static long last_read = 0;
     static bool flash = true;
 
-    //
-    // Resync the clock?
-    //
-    timeClient.update();
 
     //
     // Handle any pending over the air updates.
     //
     ArduinoOTA.handle();
+    
 
     //
     // Get the current hour/min
     //
-    int cur_hour = timeClient.getHours();
-    int cur_min  = timeClient.getMinutes();
+    int cur_hour = TZ.dateTime("H").toInt();
+    int cur_min = TZ.dateTime("i").toInt();
+
 
     //
     // Format them in a useful way.
@@ -229,6 +201,7 @@ void loop()
         tm1637.display(1, buf[1] - '0');
         tm1637.display(2, buf[2] - '0');
         tm1637.display(3, buf[3] - '0');
+
 
         // And cache it
         strcpy(prev , buf);
